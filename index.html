@@ -1,0 +1,482 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
+  <meta name="apple-mobile-web-app-capable" content="yes" />
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+  <meta name="theme-color" content="#8b2020" />
+  <meta name="mobile-web-app-capable" content="yes" />
+  <title>Goal Tracker</title>
+  <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;500;600;700;800&family=JetBrains+Mono:wght@400;500;600;700&display=swap" rel="stylesheet" />
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/react/18.2.0/umd/react.production.min.js"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/react-dom/18.2.0/umd/react-dom.production.min.js"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/babel-standalone/7.23.9/babel.min.js"></script>
+  <style>
+    * { margin: 0; padding: 0; box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
+    body { font-family: 'Outfit', sans-serif; background: #f5f0e8; overflow-x: hidden; }
+    input[type=number]::-webkit-inner-spin-button,
+    input[type=number]::-webkit-outer-spin-button { -webkit-appearance: none; }
+    input[type=number] { -moz-appearance: textfield; }
+    ::-webkit-scrollbar { width: 4px; }
+    ::-webkit-scrollbar-thumb { background: #d4cbb8; border-radius: 4px; }
+  </style>
+</head>
+<body>
+  <div id="root"></div>
+  <script type="text/babel">
+    const { useState, useEffect, useRef } = React;
+    const T = {
+      bg: "#f5f0e8", bgDeep: "#ece5d8", bgCard: "#faf7f1", bgCardAlt: "#f0ebe0",
+      border: "#ddd4c4", borderLight: "#e8e0d0",
+      red: "#8b2020", redLight: "#a83232", redBg: "#8b202010",
+      green: "#2d7a3a", greenBg: "#2d7a3a10",
+      text: "#2c2418", textMid: "#6b5e4e", textLight: "#9a8d7c",
+      white: "#fffdf8", inputBg: "#f8f4ec", inputBorder: "#d4cbb8",
+      shadow: "0 2px 12px rgba(44,36,24,0.06)", shadowLg: "0 8px 30px rgba(44,36,24,0.08)",
+    };
+
+    const DEFAULTS = {
+      daily: [
+        { id: "d1", text: "Morning meditation (15 min)", done: false },
+        { id: "d2", text: "Workout / Exercise (30 min)", done: false },
+        { id: "d3", text: "Read 20 pages", done: false },
+        { id: "d4", text: "Drink 8 glasses of water", done: false },
+        { id: "d5", text: "Journal before bed", done: false },
+        { id: "d6", text: "No social media before noon", done: false },
+      ],
+      weekly: [
+        { id: "w1", text: "Deep clean one room", done: false },
+        { id: "w2", text: "Meal prep for the week", done: false },
+        { id: "w3", text: "Review finances & budget", done: false },
+        { id: "w4", text: "Call a friend or family member", done: false },
+        { id: "w5", text: "Learn something new (course/video)", done: false },
+        { id: "w6", text: "Weekly reflection & planning", done: false },
+      ],
+      goals: [
+        { id: "g1", text: "Lose 10 kg / Get fit", progress: 15, target: 100, color: "#8b2020" },
+        { id: "g2", text: "Save $5,000", progress: 20, target: 100, color: "#2d7a3a" },
+        { id: "g3", text: "Read 24 books", progress: 10, target: 100, color: "#b8860b" },
+        { id: "g4", text: "Build a side project", progress: 5, target: 100, color: "#5b4a8a" },
+        { id: "g5", text: "Learn a new language", progress: 8, target: 100, color: "#c25516" },
+      ],
+      monthly: [
+        { id: "m1", label: "Month 1", value: 12, target: 18 },
+        { id: "m2", label: "Month 2", value: 25, target: 34 },
+        { id: "m3", label: "Month 3", value: 38, target: 50 },
+        { id: "m4", label: "Month 4", value: 52, target: 66 },
+        { id: "m5", label: "Month 5", value: 68, target: 82 },
+        { id: "m6", label: "Month 6", value: 80, target: 100 },
+      ],
+    };
+
+    function loadData(key, fallback) {
+      try { const d = localStorage.getItem("gt_" + key); return d ? JSON.parse(d) : fallback; }
+      catch { return fallback; }
+    }
+    function saveData(key, data) {
+      try { localStorage.setItem("gt_" + key, JSON.stringify(data)); } catch {}
+    }
+    function uid() { return Math.random().toString(36).slice(2, 9); }
+
+    function generateChartHistory(goals) {
+      const days = 180, data = [];
+      for (let i = 0; i < days; i++) {
+        const date = new Date(); date.setDate(date.getDate() - (days - i));
+        const entry = { day: i, date: date.toISOString().slice(0, 10) };
+        goals.forEach((g, gi) => {
+          const noise = Math.sin(i * 0.05 + gi) * 5 + Math.random() * 3;
+          entry[g.id] = Math.max(0, Math.min(100, (i / days) * g.progress * 1.2 + noise));
+        });
+        data.push(entry);
+      }
+      return data;
+    }
+
+    function TradingChart({ goals, chartData }) {
+      const [hoveredGoal, setHoveredGoal] = useState(null);
+      const [tooltip, setTooltip] = useState(null);
+      const svgRef = useRef(null);
+      const W = 820, H = 360, PAD = 52, PADT = 24, PADR = 20, PADB = 44;
+      const cW = W - PAD - PADR, cH = H - PADT - PADB;
+      if (!chartData.length) return null;
+
+      const xScale = (i) => PAD + (i / (chartData.length - 1)) * cW;
+      const yScale = (v) => PADT + cH - (v / 100) * cH;
+      const gridLines = [0, 25, 50, 75, 100].map((v) => ({ y: yScale(v), label: v + "%" }));
+
+      const months = [];
+      let lastMonth = "";
+      chartData.forEach((d, i) => {
+        const m = d.date.slice(0, 7);
+        if (m !== lastMonth) {
+          months.push({ x: xScale(i), label: new Date(d.date).toLocaleDateString("en", { month: "short", year: "2-digit" }) });
+          lastMonth = m;
+        }
+      });
+
+      const buildPath = (gId) => chartData.map((d, i) => `${i === 0 ? "M" : "L"}${xScale(i).toFixed(1)},${yScale(d[gId] || 0).toFixed(1)}`).join(" ");
+      const buildArea = (gId) => {
+        const line = chartData.map((d, i) => `${i === 0 ? "M" : "L"}${xScale(i).toFixed(1)},${yScale(d[gId] || 0).toFixed(1)}`).join(" ");
+        return `${line} L${xScale(chartData.length - 1).toFixed(1)},${yScale(0).toFixed(1)} L${xScale(0).toFixed(1)},${yScale(0).toFixed(1)} Z`;
+      };
+
+      const handleInteraction = (e) => {
+        const svg = svgRef.current; if (!svg) return;
+        const rect = svg.getBoundingClientRect();
+        const clientX = e.touches ? e.touches[0].clientX : e.clientX;
+        const mx = ((clientX - rect.left) / rect.width) * W;
+        const idx = Math.round(((mx - PAD) / cW) * (chartData.length - 1));
+        if (idx >= 0 && idx < chartData.length) {
+          const d = chartData[idx];
+          setTooltip({ x: xScale(idx), date: d.date, values: goals.map((g) => ({ name: g.text, value: (d[g.id] || 0).toFixed(1), color: g.color })) });
+        }
+      };
+
+      return (
+        <div style={{ width: "100%" }}>
+          <svg ref={svgRef} viewBox={`0 0 ${W} ${H}`}
+            style={{ width: "100%", height: "auto", minHeight: 220, display: "block", touchAction: "none" }}
+            onMouseMove={handleInteraction} onTouchMove={handleInteraction}
+            onMouseLeave={() => setTooltip(null)} onTouchEnd={() => setTooltip(null)}
+          >
+            <rect x={PAD} y={PADT} width={cW} height={cH} fill={T.white} rx="4" />
+            <defs>
+              {goals.map((g) => (
+                <linearGradient key={g.id} id={`grad-${g.id}`} x1="0" y1="0" x2="0" y2="1">
+                  <stop offset="0%" stopColor={g.color} stopOpacity="0.18" />
+                  <stop offset="100%" stopColor={g.color} stopOpacity="0.01" />
+                </linearGradient>
+              ))}
+            </defs>
+            {gridLines.map((gl, i) => (
+              <g key={i}>
+                <line x1={PAD} y1={gl.y} x2={W - PADR} y2={gl.y} stroke={T.border} strokeWidth="0.5" strokeDasharray={i === 0 || i === 4 ? "0" : "4,4"} />
+                <text x={PAD - 8} y={gl.y + 4} fill={T.textLight} fontSize="10" textAnchor="end" fontFamily="'JetBrains Mono', monospace">{gl.label}</text>
+              </g>
+            ))}
+            {months.map((m, i) => (
+              <g key={i}>
+                <line x1={m.x} y1={PADT} x2={m.x} y2={PADT + cH} stroke={T.borderLight} strokeWidth="0.3" />
+                <text x={m.x} y={H - 10} fill={T.textLight} fontSize="10" textAnchor="middle" fontFamily="'JetBrains Mono', monospace">{m.label}</text>
+              </g>
+            ))}
+            {goals.map((g) => <path key={`a-${g.id}`} d={buildArea(g.id)} fill={`url(#grad-${g.id})`} opacity={hoveredGoal && hoveredGoal !== g.id ? 0.08 : 0.8} />)}
+            {goals.map((g) => <path key={`l-${g.id}`} d={buildPath(g.id)} fill="none" stroke={g.color} strokeWidth={hoveredGoal === g.id ? 3 : 1.8} opacity={hoveredGoal && hoveredGoal !== g.id ? 0.15 : 1} />)}
+            {goals.map((g) => {
+              const v = chartData[chartData.length - 1][g.id] || 0;
+              return <circle key={`d-${g.id}`} cx={xScale(chartData.length - 1)} cy={yScale(v)} r="4" fill={T.white} stroke={g.color} strokeWidth="2" opacity={hoveredGoal && hoveredGoal !== g.id ? 0.15 : 1} />;
+            })}
+            {tooltip && (
+              <React.Fragment>
+                <line x1={tooltip.x} y1={PADT} x2={tooltip.x} y2={PADT + cH} stroke={T.red} strokeWidth="0.8" strokeDasharray="4,3" opacity="0.5" />
+                {tooltip.values.map((v, i) => <circle key={i} cx={tooltip.x} cy={yScale(parseFloat(v.value))} r="4" fill={v.color} stroke={T.white} strokeWidth="1.5" />)}
+              </React.Fragment>
+            )}
+          </svg>
+          {tooltip && (
+            <div style={{ background: T.white, border: `1px solid ${T.border}`, borderLeft: `3px solid ${T.red}`, borderRadius: 8, padding: "10px 14px", fontSize: 12, color: T.textMid, display: "inline-block", marginTop: 4, fontFamily: "'JetBrains Mono', monospace", boxShadow: T.shadow }}>
+              <div style={{ fontWeight: 700, marginBottom: 6, color: T.text, fontSize: 13 }}>{tooltip.date}</div>
+              {tooltip.values.map((v, i) => (
+                <div key={i} style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 3 }}>
+                  <span style={{ width: 10, height: 10, borderRadius: 3, background: v.color, display: "inline-block" }} />
+                  <span style={{ color: T.textMid, flex: 1 }}>{v.name.slice(0, 20)}</span>
+                  <span style={{ color: v.color, fontWeight: 700 }}>{v.value}%</span>
+                </div>
+              ))}
+            </div>
+          )}
+          <div style={{ display: "flex", flexWrap: "wrap", gap: 10, marginTop: 12 }}>
+            {goals.map((g) => (
+              <div key={g.id} style={{ display: "flex", alignItems: "center", gap: 6, cursor: "pointer", opacity: hoveredGoal && hoveredGoal !== g.id ? 0.3 : 1, padding: "4px 10px", borderRadius: 6, background: hoveredGoal === g.id ? `${g.color}12` : "transparent" }}
+                onMouseEnter={() => setHoveredGoal(g.id)} onMouseLeave={() => setHoveredGoal(null)}>
+                <span style={{ width: 12, height: 3, borderRadius: 2, background: g.color, display: "inline-block" }} />
+                <span style={{ fontSize: 11, color: T.text, fontFamily: "'JetBrains Mono', monospace" }}>{g.text}</span>
+              </div>
+            ))}
+          </div>
+        </div>
+      );
+    }
+
+    function CheckItem({ item, onToggle, onEdit, onDelete }) {
+      const [editing, setEditing] = useState(false);
+      const [text, setText] = useState(item.text);
+      const save = () => { if (text.trim()) onEdit(item.id, text.trim()); setEditing(false); };
+      return (
+        <div style={{ display: "flex", alignItems: "center", gap: 10, padding: "11px 14px", background: item.done ? T.greenBg : T.white, borderRadius: 10, marginBottom: 6, border: `1px solid ${item.done ? T.green + "20" : T.border}`, boxShadow: "0 1px 3px rgba(44,36,24,0.04)" }}>
+          <button onClick={() => onToggle(item.id)} style={{ width: 24, height: 24, borderRadius: 6, border: `2px solid ${item.done ? T.green : T.inputBorder}`, background: item.done ? T.green : "transparent", cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0 }}>
+            {item.done && <svg width="12" height="12" viewBox="0 0 12 12" fill="none"><path d="M2.5 6L5 8.5L9.5 3.5" stroke="#fff" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" /></svg>}
+          </button>
+          {editing ? (
+            <input autoFocus value={text} onChange={(e) => setText(e.target.value)} onBlur={save} onKeyDown={(e) => e.key === "Enter" && save()}
+              style={{ flex: 1, background: T.inputBg, border: `1px solid ${T.red}`, borderRadius: 6, padding: "6px 8px", color: T.text, fontSize: 14, fontFamily: "'Outfit', sans-serif", outline: "none" }} />
+          ) : (
+            <span style={{ flex: 1, color: item.done ? T.textLight : T.text, textDecoration: item.done ? "line-through" : "none", fontSize: 14 }}>{item.text}</span>
+          )}
+          <button onClick={() => setEditing(true)} style={{ background: "none", border: "none", color: T.textLight, cursor: "pointer", fontSize: 14, padding: 4 }}>✏️</button>
+          <button onClick={() => onDelete(item.id)} style={{ background: "none", border: "none", color: T.textLight, cursor: "pointer", fontSize: 14, padding: 4 }}>🗑</button>
+        </div>
+      );
+    }
+    function App() {
+      const [daily, setDaily] = useState(() => loadData("daily", DEFAULTS.daily));
+      const [weekly, setWeekly] = useState(() => loadData("weekly", DEFAULTS.weekly));
+      const [goals, setGoals] = useState(() => loadData("goals", DEFAULTS.goals));
+      const [monthly, setMonthly] = useState(() => loadData("monthly", DEFAULTS.monthly));
+      const [chartData, setChartData] = useState([]);
+      const [tab, setTab] = useState("daily");
+
+      useEffect(() => { setChartData(generateChartHistory(goals)); }, []);
+      useEffect(() => { saveData("daily", daily); }, [daily]);
+      useEffect(() => { saveData("weekly", weekly); }, [weekly]);
+      useEffect(() => { saveData("goals", goals); }, [goals]);
+      useEffect(() => { saveData("monthly", monthly); }, [monthly]);
+
+      const toggle = (list, setList) => (id) => setList(list.map((i) => (i.id === id ? { ...i, done: !i.done } : i)));
+      const editItem = (list, setList) => (id, text) => setList(list.map((i) => (i.id === id ? { ...i, text } : i)));
+      const delItem = (list, setList) => (id) => setList(list.filter((i) => i.id !== id));
+      const addItem = (list, setList) => (text) => setList([...list, { id: uid(), text, done: false }]);
+
+      const editGoal = (id, text, progress) => setGoals(goals.map((g) => (g.id === id ? { ...g, text, progress } : g)));
+      const delGoal = (id) => setGoals(goals.filter((g) => g.id !== id));
+      const progressGoal = (id, progress) => setGoals(goals.map((g) => (g.id === id ? { ...g, progress } : g)));
+      const addGoal = (text) => {
+        const colors = [T.red, T.green, "#b8860b", "#5b4a8a", "#c25516", "#2874a6", "#7d6b3a"];
+        setGoals([...goals, { id: uid(), text, progress: 0, target: 100, color: colors[goals.length % colors.length] }]);
+      };
+      const updateMonthly = (id, value, target) => setMonthly(monthly.map((m) => (m.id === id ? { ...m, value, target } : m)));
+
+      const dailyPct = daily.length ? Math.round((daily.filter((d) => d.done).length / daily.length) * 100) : 0;
+      const weeklyPct = weekly.length ? Math.round((weekly.filter((d) => d.done).length / weekly.length) * 100) : 0;
+      const overallPct = monthly.length > 0 ? Math.round(monthly.reduce((a, m) => a + (m.target > 0 ? (m.value / m.target) * 100 : 0), 0) / monthly.length) : 0;
+
+      const tabs = [
+        { id: "daily", label: "Daily", icon: "☀️" },
+        { id: "weekly", label: "Weekly", icon: "📅" },
+        { id: "goals", label: "6-Month", icon: "🎯" },
+        { id: "chart", label: "Chart", icon: "📈" },
+      ];
+
+      const resetAll = () => {
+        if (confirm("Reset all data to defaults? This cannot be undone.")) {
+          setDaily(DEFAULTS.daily); setWeekly(DEFAULTS.weekly);
+          setGoals(DEFAULTS.goals); setMonthly(DEFAULTS.monthly);
+        }
+      };
+
+      return (
+        <div style={{ minHeight: "100vh", background: `linear-gradient(180deg, ${T.bgDeep} 0%, ${T.bg} 100%)`, color: T.text, fontFamily: "'Outfit', sans-serif", paddingBottom: 80 }}>
+          <div style={{ background: `linear-gradient(135deg, ${T.red} 0%, #6b1515 100%)`, padding: "32px 20px 24px", textAlign: "center", position: "relative", overflow: "hidden" }}>
+            <h1 style={{ margin: 0, fontSize: 24, fontWeight: 800, letterSpacing: 1.5, color: "#fff", textTransform: "uppercase" }}>Goal Tracker</h1>
+            <p style={{ margin: "5px 0 0", color: "rgba(255,255,255,0.5)", fontSize: 11, fontFamily: "'JetBrains Mono', monospace", letterSpacing: 2 }}>DAILY · WEEKLY · 6-MONTH PLAN</p>
+            <div style={{ display: "flex", justifyContent: "center", gap: 24, marginTop: 16 }}>
+              {[{ label: "TODAY", val: dailyPct + "%" }, { label: "WEEK", val: weeklyPct + "%" }, { label: "GOALS", val: goals.length }].map((s, i) => (
+                <div key={i} style={{ textAlign: "center" }}>
+                  <div style={{ fontSize: 22, fontWeight: 700, color: "#ffd6d6", fontFamily: "'JetBrains Mono', monospace" }}>{s.val}</div>
+                  <div style={{ fontSize: 9, color: "rgba(255,255,255,0.4)", letterSpacing: 1.2, marginTop: 2 }}>{s.label}</div>
+                </div>
+              ))}
+            </div>
+          </div>
+          <div style={{ display: "flex", background: T.bgDeep, borderBottom: `1px solid ${T.border}`, position: "sticky", top: 0, zIndex: 10 }}>
+            {tabs.map((t) => (
+              <button key={t.id} onClick={() => setTab(t.id)}
+                style={{ flex: 1, padding: "10px 4px 8px", background: tab === t.id ? T.bg : "transparent", border: "none", borderBottom: `3px solid ${tab === t.id ? T.red : "transparent"}`, color: tab === t.id ? T.red : T.textLight, cursor: "pointer", fontSize: 11, fontWeight: 600, fontFamily: "'Outfit', sans-serif" }}>
+                <span style={{ display: "block", fontSize: 16, marginBottom: 1 }}>{t.icon}</span>{t.label}
+              </button>
+            ))}
+          </div>
+          <div style={{ padding: "16px 14px 0", maxWidth: 720, margin: "0 auto" }}>
+            {tab === "daily" && (
+              <div>
+                <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 12 }}>
+                  <h2 style={{ margin: 0, fontSize: 17, fontWeight: 700 }}>☀️ Daily Routine</h2>
+                  <span style={{ fontSize: 12, color: T.textLight, fontFamily: "'JetBrains Mono', monospace" }}>{daily.filter((d) => d.done).length}/{daily.length}</span>
+                </div>
+                <div style={{ display: "flex", justifyContent: "center", marginBottom: 14 }}>
+                  <svg width="90" height="90" viewBox="0 0 100 100">
+                    <circle cx="50" cy="50" r="40" fill="none" stroke={T.borderLight} strokeWidth="6" />
+                    <circle cx="50" cy="50" r="40" fill="none" stroke={T.red} strokeWidth="6" strokeDasharray={`${dailyPct * 2.51} 251`} strokeLinecap="round" transform="rotate(-90 50 50)" style={{ transition: "stroke-dasharray 0.5s" }} />
+                    <text x="50" y="50" textAnchor="middle" dy="0.35em" fill={T.text} fontSize="20" fontWeight="700" fontFamily="'JetBrains Mono', monospace">{dailyPct}%</text>
+                  </svg>
+                </div>
+                {daily.map((item) => <CheckItem key={item.id} item={item} onToggle={toggle(daily, setDaily)} onEdit={editItem(daily, setDaily)} onDelete={delItem(daily, setDaily)} />)}
+                <AddItem placeholder="Add a daily task..." onAdd={addItem(daily, setDaily)} />
+              </div>
+            )}
+            {tab === "weekly" && (
+              <div>
+                <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 12 }}>
+                  <h2 style={{ margin: 0, fontSize: 17, fontWeight: 700 }}>📅 Weekly Goals</h2>
+                  <span style={{ fontSize: 12, color: T.textLight, fontFamily: "'JetBrains Mono', monospace" }}>{weekly.filter((d) => d.done).length}/{weekly.length}</span>
+                </div>
+                <div style={{ display: "flex", justifyContent: "center", marginBottom: 14 }}>
+                  <svg width="90" height="90" viewBox="0 0 100 100">
+                    <circle cx="50" cy="50" r="40" fill="none" stroke={T.borderLight} strokeWidth="6" />
+                    <circle cx="50" cy="50" r="40" fill="none" stroke={T.red} strokeWidth="6" strokeDasharray={`${weeklyPct * 2.51} 251`} strokeLinecap="round" transform="rotate(-90 50 50)" style={{ transition: "stroke-dasharray 0.5s" }} />
+                    <text x="50" y="50" textAnchor="middle" dy="0.35em" fill={T.text} fontSize="20" fontWeight="700" fontFamily="'JetBrains Mono', monospace">{weeklyPct}%</text>
+                  </svg>
+                </div>
+                {weekly.map((item) => <CheckItem key={item.id} item={item} onToggle={toggle(weekly, setWeekly)} onEdit={editItem(weekly, setWeekly)} onDelete={delItem(weekly, setWeekly)} />)}
+                <AddItem placeholder="Add a weekly task..." onAdd={addItem(weekly, setWeekly)} />
+              </div>
+            )}
+            {tab === "goals" && (
+              <div>
+                <h2 style={{ margin: "0 0 12px", fontSize: 17, fontWeight: 700 }}>🎯 6-Month Goal Plan</h2>
+                <div style={{ display: "grid", gap: 10 }}>
+                  {goals.map((g) => <GoalCard key={g.id} goal={g} onEdit={editGoal} onDelete={delGoal} onProgress={progressGoal} />)}
+                </div>
+                <AddItem placeholder="Add a new 6-month goal..." onAdd={addGoal} />
+              </div>
+            )}
+            {tab === "chart" && (
+              <div>
+                <h2 style={{ margin: "0 0 4px", fontSize: 17, fontWeight: 700 }}>📈 Progress Overview</h2>
+                <p style={{ color: T.textLight, fontSize: 11, margin: "0 0 10px", fontFamily: "'JetBrains Mono', monospace" }}>6-month tracking · Touch to inspect</p>
+                <div style={{ background: T.bgCard, border: `1px solid ${T.border}`, borderRadius: 14, padding: "14px 10px 10px", boxShadow: T.shadowLg }}>
+                  <TradingChart goals={goals} chartData={chartData} />
+                </div>
+                <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginTop: 24, marginBottom: 10 }}>
+                  <h3 style={{ fontSize: 15, fontWeight: 700, margin: 0 }}>Monthly Breakdown</h3>
+                  <span style={{ fontSize: 10, color: T.textLight, fontFamily: "'JetBrains Mono', monospace" }}>tap ✏️ to edit</span>
+                </div>
+                <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(105px, 1fr))", gap: 8 }}>
+                  {monthly.map((m, i) => <MonthlyCard key={m.id} month={m} prev={i > 0 ? monthly[i - 1] : null} onChange={updateMonthly} />)}
+                </div>
+                <div style={{ marginTop: 14, background: T.white, border: `1px solid ${T.border}`, borderRadius: 10, padding: "12px 16px", display: "flex", justifyContent: "space-between", alignItems: "center", boxShadow: T.shadow }}>
+                  <div>
+                    <div style={{ fontSize: 10, color: T.textLight, fontFamily: "'JetBrains Mono', monospace", marginBottom: 2 }}>OVERALL</div>
+                    <div style={{ fontSize: 20, fontWeight: 800, color: T.red, fontFamily: "'JetBrains Mono', monospace" }}>{overallPct}%</div>
+                  </div>
+                  <div style={{ flex: 1, marginLeft: 16, height: 8, background: T.bgCardAlt, borderRadius: 4, overflow: "hidden" }}>
+                    <div style={{ height: "100%", width: `${overallPct}%`, background: `linear-gradient(90deg, ${T.red}88, ${T.red})`, borderRadius: 4, transition: "width 0.5s" }} />
+                  </div>
+                </div>
+              </div>
+            )}
+            <div style={{ marginTop: 30, textAlign: "center" }}>
+              <button onClick={resetAll} style={{ background: "none", border: `1px solid ${T.border}`, borderRadius: 8, padding: "8px 20px", color: T.textLight, cursor: "pointer", fontSize: 12 }}>
+                Reset All Data
+              </button>
+            </div>
+          </div>
+        </div>
+      );
+    }
+
+    ReactDOM.createRoot(document.getElementById("root")).render(<App />);
+  </script>
+</body>
+</html>
+    function GoalCard({ goal, onEdit, onDelete, onProgress }) {
+      const [editing, setEditing] = useState(false);
+      const [text, setText] = useState(goal.text);
+      const [prog, setProg] = useState(goal.progress);
+      const save = () => { onEdit(goal.id, text.trim(), Number(prog)); setEditing(false); };
+      const pct = Math.min(100, Math.max(0, goal.progress));
+      const isUp = pct >= 50;
+      return (
+        <div style={{ background: T.white, border: `1px solid ${T.border}`, borderLeft: `4px solid ${goal.color}`, borderRadius: 12, padding: 16, boxShadow: T.shadow }}>
+          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", marginBottom: 10 }}>
+            {editing ? (
+              <div style={{ flex: 1, display: "flex", flexDirection: "column", gap: 6 }}>
+                <input autoFocus value={text} onChange={(e) => setText(e.target.value)}
+                  style={{ background: T.inputBg, border: `1px solid ${T.red}`, borderRadius: 6, padding: "6px 8px", color: T.text, fontSize: 14, outline: "none" }} />
+                <div style={{ display: "flex", alignItems: "center", gap: 6, flexWrap: "wrap" }}>
+                  <span style={{ color: T.textLight, fontSize: 12 }}>Progress:</span>
+                  <input type="number" min="0" max="100" value={prog} onChange={(e) => setProg(e.target.value)}
+                    style={{ width: 56, background: T.inputBg, border: `1px solid ${T.red}`, borderRadius: 6, padding: "4px 8px", color: T.text, fontSize: 13, outline: "none" }} />
+                  <span style={{ color: T.textLight, fontSize: 12 }}>%</span>
+                  <button onClick={save} style={{ background: T.red, color: "#fff", border: "none", borderRadius: 6, padding: "5px 14px", cursor: "pointer", fontSize: 12, fontWeight: 600 }}>Save</button>
+                  <button onClick={() => setEditing(false)} style={{ background: T.bgCardAlt, color: T.textMid, border: `1px solid ${T.border}`, borderRadius: 6, padding: "5px 10px", cursor: "pointer", fontSize: 12 }}>Cancel</button>
+                </div>
+              </div>
+            ) : (
+              <React.Fragment>
+                <div>
+                  <div style={{ color: T.text, fontSize: 15, fontWeight: 600, marginBottom: 4 }}>{goal.text}</div>
+                  <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
+                    <span style={{ color: goal.color, fontWeight: 700, fontSize: 22, fontFamily: "'JetBrains Mono', monospace" }}>{pct}%</span>
+                    <span style={{ color: isUp ? T.green : T.red, fontSize: 11, fontWeight: 600 }}>{isUp ? "▲ on track" : "▼ needs push"}</span>
+                  </div>
+                </div>
+                <div style={{ display: "flex", gap: 4 }}>
+                  <button onClick={() => setEditing(true)} style={{ background: "none", border: "none", color: T.textLight, cursor: "pointer", fontSize: 14 }}>✏️</button>
+                  <button onClick={() => onDelete(goal.id)} style={{ background: "none", border: "none", color: T.textLight, cursor: "pointer", fontSize: 14 }}>🗑</button>
+                </div>
+              </React.Fragment>
+            )}
+          </div>
+          {!editing && (
+            <React.Fragment>
+              <div style={{ height: 7, background: T.bgCardAlt, borderRadius: 4, overflow: "hidden" }}>
+                <div style={{ height: "100%", width: `${pct}%`, background: `linear-gradient(90deg, ${goal.color}88, ${goal.color})`, borderRadius: 4, transition: "width 0.5s" }} />
+              </div>
+              <div style={{ display: "flex", gap: 6, marginTop: 10 }}>
+                {[5, 10].map((n) => (
+                  <button key={n} onClick={() => onProgress(goal.id, Math.min(100, goal.progress + n))}
+                    style={{ background: `${goal.color}10`, border: `1px solid ${goal.color}30`, color: goal.color, borderRadius: 6, padding: "4px 12px", cursor: "pointer", fontSize: 12, fontWeight: 600, fontFamily: "'JetBrains Mono', monospace" }}>
+                    +{n}%
+                  </button>
+                ))}
+              </div>
+            </React.Fragment>
+          )}
+        </div>
+      );
+    }
+
+    function MonthlyCard({ month, prev, onChange }) {
+      const [editing, setEditing] = useState(false);
+      const [val, setVal] = useState(month.value);
+      const [tgt, setTgt] = useState(month.target);
+      const pct = month.target > 0 ? Math.round((month.value / month.target) * 100) : 0;
+      const prevPct = prev && prev.target > 0 ? Math.round((prev.value / prev.target) * 100) : 0;
+      const delta = pct - prevPct;
+      const up = delta >= 0;
+      const save = () => { onChange(month.id, Number(val), Number(tgt)); setEditing(false); };
+      return (
+        <div style={{ background: T.white, border: `1px solid ${T.border}`, borderTop: `3px solid ${up ? T.green : T.red}`, borderRadius: 10, padding: 14, textAlign: "center", boxShadow: T.shadow, position: "relative" }}>
+          <button onClick={() => setEditing(!editing)} style={{ position: "absolute", top: 6, right: 6, background: "none", border: "none", color: T.textLight, cursor: "pointer", fontSize: 12, padding: 2 }}>✏️</button>
+          <div style={{ fontSize: 11, color: T.textLight, marginBottom: 6, fontFamily: "'JetBrains Mono', monospace", fontWeight: 600, letterSpacing: 0.5 }}>{month.label}</div>
+          {editing ? (
+            <div style={{ display: "flex", flexDirection: "column", gap: 4, alignItems: "center" }}>
+              <div style={{ display: "flex", alignItems: "center", gap: 4, fontSize: 11, color: T.textMid }}>
+                <span>Done:</span>
+                <input type="number" min="0" max="999" value={val} onChange={(e) => setVal(e.target.value)}
+                  style={{ width: 48, background: T.inputBg, border: `1px solid ${T.inputBorder}`, borderRadius: 4, padding: "3px 4px", color: T.text, fontSize: 12, textAlign: "center", outline: "none" }} />
+              </div>
+              <div style={{ display: "flex", alignItems: "center", gap: 4, fontSize: 11, color: T.textMid }}>
+                <span>Target:</span>
+                <input type="number" min="0" max="999" value={tgt} onChange={(e) => setTgt(e.target.value)}
+                  style={{ width: 48, background: T.inputBg, border: `1px solid ${T.inputBorder}`, borderRadius: 4, padding: "3px 4px", color: T.text, fontSize: 12, textAlign: "center", outline: "none" }} />
+              </div>
+              <button onClick={save} style={{ background: T.red, color: "#fff", border: "none", borderRadius: 5, padding: "4px 14px", cursor: "pointer", fontSize: 11, fontWeight: 600, marginTop: 2 }}>Save</button>
+            </div>
+          ) : (
+            <React.Fragment>
+              <div style={{ fontSize: 26, fontWeight: 800, color: up ? T.green : T.red, fontFamily: "'JetBrains Mono', monospace", lineHeight: 1 }}>{pct}%</div>
+              <div style={{ fontSize: 11, color: T.textMid, margin: "4px 0 2px" }}>{month.value} / {month.target}</div>
+              <div style={{ fontSize: 11, color: up ? T.green : T.red, fontWeight: 600 }}>{up ? "▲" : "▼"} {Math.abs(delta)}%</div>
+              <div style={{ height: 5, background: T.bgCardAlt, borderRadius: 3, marginTop: 8, overflow: "hidden" }}>
+                <div style={{ height: "100%", width: `${pct}%`, background: up ? T.green : T.red, borderRadius: 3 }} />
+              </div>
+            </React.Fragment>
+          )}
+        </div>
+      );
+    }
+
+    function AddItem({ placeholder, onAdd }) {
+      const [text, setText] = useState("");
+      const submit = () => { if (text.trim()) { onAdd(text.trim()); setText(""); } };
+      return (
+        <div style={{ display: "flex", gap: 8, marginTop: 8 }}>
+          <input value={text} onChange={(e) => setText(e.target.value)} onKeyDown={(e) => e.key === "Enter" && submit()} placeholder={placeholder}
+            style={{ flex: 1, background: T.inputBg, border: `1px solid ${T.inputBorder}`, borderRadius: 8, padding: "10px 12px", color: T.text, fontSize: 14, fontFamily: "'Outfit', sans-serif", outline: "none" }} />
+          <button onClick={submit} style={{ background: T.red, color: "#fff", border: "none", borderRadius: 8, padding: "10px 18px", cursor: "pointer", fontWeight: 600, fontSize: 13 }}>+ Add</button>
+        </div>
+      );
+    }
